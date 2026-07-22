@@ -5,6 +5,7 @@ All queries are scoped by user_id for data isolation.
 """
 
 import datetime
+from datetime import timezone
 import hashlib
 import json
 import time
@@ -12,6 +13,9 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any
+
+def utcnow():
+    return datetime.datetime.now(timezone.utc)
 
 from sqlalchemy import (
     Boolean,
@@ -130,7 +134,7 @@ class Organization(Base):
     name = Column(String, nullable=False, unique=True)
     plan = Column(String, default="free")  # free | pro | enterprise
     max_vehicles = Column(Integer, default=5)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     users = relationship("User", back_populates="organization")
 
@@ -149,7 +153,7 @@ class User(Base):
     )  # admin | fleet_manager | technician | driver
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     vehicles = relationship(
         "Vehicle", back_populates="user", cascade="all, delete-orphan"
@@ -171,7 +175,7 @@ class Session(Base):
     refresh_count = Column(Integer, default=0)  # Track rotation count
     is_revoked = Column(Boolean, default=False)  # Hard revocation flag
     revoked_at = Column(DateTime, nullable=True)  # When revocation occurred
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class APIKey(Base):
@@ -189,7 +193,7 @@ class APIKey(Base):
     scopes = Column(Text, default="[]")  # JSON array of scopes
     expires_at = Column(DateTime, nullable=True)  # Optional expiry
     last_used_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     is_active = Column(Boolean, default=True)
 
 
@@ -210,9 +214,9 @@ class WebhookSubscription(Base):
     retry_count = Column(Integer, default=3)
     timeout_seconds = Column(Integer, default=10)
     last_triggered_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     updated_at = Column(
-        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (Index("ix_webhook_subscriptions_user", "user_id", "is_active"),)
@@ -231,7 +235,7 @@ class WebhookLog(Base):
     response_body = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     attempt = Column(Integer, default=1)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (Index("ix_webhook_logs_webhook", "webhook_id", "created_at"),)
 
@@ -247,7 +251,7 @@ class AuditLog(Base):
     resource_type = Column(String, nullable=True)  # e.g. "TrainedModel", "Vehicle"
     resource_id = Column(Integer, nullable=True)
     details = Column(Text, nullable=True)  # JSON with extra context
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class Vehicle(Base):
@@ -261,7 +265,7 @@ class Vehicle(Base):
     engine_type = Column(String)
     mileage = Column(Float)
     last_service_date = Column(Date)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="vehicles")
     uploads = relationship(
@@ -292,7 +296,7 @@ class SensorUpload(Base):
     filename = Column(String)
     row_count_raw = Column(Integer)
     row_count_clean = Column(Integer)
-    upload_time = Column(DateTime, default=datetime.datetime.utcnow)
+    upload_time = Column(DateTime, default=utcnow)
     preprocessing_log = Column(Text)  # JSON string
 
     vehicle = relationship("Vehicle", back_populates="uploads")
@@ -358,7 +362,7 @@ class TrainedModel(Base):
     training_data_hash = Column(String, nullable=True)  # md5 of training data
     feature_columns_json = Column(Text, nullable=True)  # JSON list of feature cols
 
-    trained_at = Column(DateTime, default=datetime.datetime.utcnow)
+    trained_at = Column(DateTime, default=utcnow)
 
 
 class Prediction(Base):
@@ -372,7 +376,7 @@ class Prediction(Base):
     failure_prob = Column(Float)
     health_score = Column(Float)
     top_features = Column(Text)  # JSON
-    predicted_at = Column(DateTime, default=datetime.datetime.utcnow)
+    predicted_at = Column(DateTime, default=utcnow)
 
     vehicle = relationship("Vehicle", back_populates="predictions")
 
@@ -388,7 +392,7 @@ class MaintenanceHistory(Base):
     parts_replaced = Column(String)
     cost = Column(Float)
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     vehicle = relationship("Vehicle", back_populates="maintenance_records")
 
@@ -406,7 +410,7 @@ class Alert(Base):
     acknowledged_at = Column(DateTime, nullable=True)
     acknowledged_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     alert_fingerprint = Column(String, index=True, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     vehicle = relationship("Vehicle", back_populates="alerts")
 
@@ -429,7 +433,7 @@ class Incident(Base):
     related_alert_ids = Column(Text)  # JSON list of alert IDs
     resolved_at = Column(DateTime, nullable=True)
     resolution_notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class PushSubscription(Base):
@@ -440,7 +444,7 @@ class PushSubscription(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     subscription_json = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class NotificationPreferences(Base):
@@ -456,9 +460,9 @@ class NotificationPreferences(Base):
     quiet_hours_start = Column(String, nullable=True)  # e.g. "22:00"
     quiet_hours_end = Column(String, nullable=True)  # e.g. "07:00"
     min_severity = Column(String, default="Medium")  # only alert above this
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     updated_at = Column(
-        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1740,7 +1744,7 @@ def get_or_create_default_upload(vehicle_id: int, user_id: int) -> int:
                 filename="live_telemetry_stream",
                 row_count_raw=0,
                 row_count_clean=0,
-                upload_time=datetime.datetime.utcnow()
+                upload_time=utcnow()
             )
             session.add(upload)
             session.commit()
