@@ -1170,7 +1170,7 @@ def _make_alert_fingerprint(
     fluctuations don't create separate alert groups.  When no sensor value
     is available (e.g. ``failure_prob_above`` rules), ``none`` is used.
     """
-    bucket = int(round(sensor_value / 5.0)) * 5 if sensor_value is not None else "none"
+    bucket = round(sensor_value / 5.0) * 5 if sensor_value is not None else "none"
     raw = f"{vehicle_id}:{alert_type}:{bucket}"
     return hashlib.md5(raw.encode()).hexdigest()
 
