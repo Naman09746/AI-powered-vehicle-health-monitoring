@@ -15,8 +15,19 @@ import asyncio
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
 from typing import Any
 
 import httpx

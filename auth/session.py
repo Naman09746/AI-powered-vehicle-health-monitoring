@@ -11,7 +11,12 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
 from typing import Any
 
 from core.config import MAX_REFRESH_COUNT, SECRET_KEY, SESSION_TTL_HOURS

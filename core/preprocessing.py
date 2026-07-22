@@ -3,7 +3,11 @@ Data preprocessing pipeline - cleaning, feature engineering, synthetic labeling.
 Every transformation step is logged for auditability.
 """
 
-from datetime import UTC
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
 
 import numpy as np
 import pandas as pd

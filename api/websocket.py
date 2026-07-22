@@ -11,7 +11,12 @@ and receive JSON-encoded sensor readings every 5 seconds.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
 from typing import Any
 
 import core.db as database

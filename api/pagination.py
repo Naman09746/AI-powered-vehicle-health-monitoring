@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 from fastapi import Query
 from pydantic import BaseModel, Field
@@ -43,7 +43,7 @@ def encode_cursor(data: dict[str, Any]) -> str:
     ).decode()
 
 
-class CursorPage[T](BaseModel):
+class CursorPage(BaseModel, Generic[T]):
     """Cursor-based paginated response."""
 
     items: list[T] = Field(default_factory=list)

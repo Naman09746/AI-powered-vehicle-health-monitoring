@@ -14,7 +14,12 @@ Usage:
 import json
 import logging
 import sys
-from datetime import UTC, datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
+from datetime import datetime
 from pathlib import Path
 
 from core.config import ENV, LOG_LEVEL

@@ -4,7 +4,12 @@ Authentication router — login, register, logout, token refresh, and revocation
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status

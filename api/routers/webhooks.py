@@ -7,7 +7,12 @@ Allows users to subscribe to async events (predictions, alerts, training, etc.).
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status

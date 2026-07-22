@@ -18,7 +18,11 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import time
-from datetime import UTC
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc
 from typing import Any
 
 from core.config import REDIS_URL, SECRET_KEY, SESSION_TTL_HOURS
