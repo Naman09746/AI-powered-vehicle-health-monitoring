@@ -172,11 +172,14 @@ def generate_failure_scenario(profile: str, n_rows: int = 200) -> pd.DataFrame:
         (start_ts + pd.Timedelta(hours=i)).isoformat() for i in range(n_rows)
     ]
 
-    # Initialise all sensor columns with NaN
+    # Initialise all sensor columns with normal baseline values
+    normal_sensors = _FAILURE_PROFILES["normal_operation"]["sensors"]
     for col in SENSOR_COLUMNS:
-        data[col] = [np.nan] * n_rows
+        value_fn = normal_sensors.get(col, lambda i, t: 50.0)
+        vals = [_round_sensor(col, value_fn(i, n_rows) + np.random.normal(0, 0.3)) for i in range(n_rows)]
+        data[col] = vals
 
-    # Populate only the sensors this profile touches; others remain NaN
+    # Populate/override specific sensors modified by this failure profile
     for sensor, value_fn in profile_def["sensors"].items():
         if sensor not in data:
             continue

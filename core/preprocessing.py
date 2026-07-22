@@ -260,10 +260,25 @@ def _synthetic_label_summary(df: pd.DataFrame) -> str:
 
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
     """Get the list of feature columns suitable for ML training."""
-    exclude = {"timestamp", "failure_label", "maintenance_needed", "id"}
+    exclude = {
+        "timestamp",
+        "failure_label",
+        "maintenance_needed",
+        "id",
+        "profile",
+        "vehicle_id_display",
+        "user_id",
+        "vehicle_id",
+        "upload_id",
+        "created_at",
+    }
     # Include base sensor columns + engineered features, exclude outlier flags & label
     feature_cols = [
-        col for col in df.columns if col not in exclude and not col.endswith("_outlier")
+        col
+        for col in df.columns
+        if col not in exclude
+        and not col.endswith("_outlier")
+        and pd.api.types.is_numeric_dtype(df[col])
     ]
     return feature_cols
 
