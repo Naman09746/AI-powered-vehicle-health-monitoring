@@ -70,6 +70,14 @@ Base = declarative_base()
 _sync_url = DATABASE_URL.replace(
     "postgresql+asyncpg://", "postgresql+psycopg2://"
 ).replace("sqlite+aiosqlite://", "sqlite://")
+
+if _sync_url.startswith("postgresql://") and "+psycopg2" not in _sync_url:
+    _sync_url = _sync_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+if "postgresql" in _sync_url and "sslmode" not in _sync_url and "localhost" not in _sync_url and "127.0.0.1" not in _sync_url:
+    sep = "&" if "?" in _sync_url else "?"
+    _sync_url += f"{sep}sslmode=require"
+
 _is_sqlite = _sync_url.startswith("sqlite")
 
 if _is_sqlite:

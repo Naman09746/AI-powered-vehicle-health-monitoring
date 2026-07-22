@@ -50,7 +50,15 @@ def _extract_bearer_token(request: Request) -> str | None:
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, request: Request):
     """Authenticate with username + password, receive a session token."""
-    user = database.authenticate_user(body.username, body.password)
+    try:
+        user = database.authenticate_user(body.username, body.password)
+    except Exception as e:
+        log.error("Login DB error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database connection error: {str(e)}",
+        )
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,13 +81,21 @@ async def login(body: LoginRequest, request: Request):
 @router.post("/register", response_model=StatusResponse)
 async def register(body: RegisterRequest):
     """Register a new user account."""
-    user = database.create_user(
-        username=body.username,
-        password=body.password,
-        name=body.name,
-        email=body.email,
-        phone=body.phone,
-    )
+    try:
+        user = database.create_user(
+            username=body.username,
+            password=body.password,
+            name=body.name,
+            email=body.email,
+            phone=body.phone,
+        )
+    except Exception as e:
+        log.error("Registration DB error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}",
+        )
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

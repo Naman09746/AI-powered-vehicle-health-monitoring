@@ -311,15 +311,19 @@ def setup_middleware(app: FastAPI) -> None:
     # Merge configured origins + hardcoded production origin as safety net
     # (prevents misconfiguration when the ALLOWED_ORIGINS env var omits the
     #  production frontend URL — a common pitfall on Render/Vercel deploys)
-    _cors_origins = list(ALLOWED_ORIGINS)
-    _vhm_frontend = "https://ai-powered-vehicle-health-monitorin.vercel.app"
-    if _vhm_frontend not in _cors_origins:
-        _cors_origins.append(_vhm_frontend)
+    _cors_origins = [o for o in ALLOWED_ORIGINS if o and o != "*"]
+    _cors_origins.extend([
+        "https://ai-powered-vehicle-health-monitorin.vercel.app",
+        "https://ai-powered-vehicle-health-monitoring.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:8000",
+    ])
+    _cors_origins = list(dict.fromkeys(_cors_origins))
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins,
-        allow_origin_regex=r"https://.*\.vercel\.app",
+        allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
