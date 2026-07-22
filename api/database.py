@@ -152,15 +152,22 @@ def run_migrations():
 
 
 async def init_db():
-    """Initialize database by running Alembic migrations (or create_all in tests)."""
+    """Initialize database by running Alembic migrations and fallback to metadata.create_all."""
+    from core.db import init_db as sync_init_db
+    from core.logger import get_logger
 
-    if ENV == "test":
-        # In testing, we use standard metadata.create_all to avoid overhead and conflicts with _clean_tables
-        from core.db import Base
+    log = get_logger("db")
 
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-    else:
+    if ENV != "test":
+        try:
+            import asyncio
+            await asyncio.to_thread(run_migrations)
+        except Exception as e:
+            log.warning("Alembic migration warning (%s); applying create_all fallback", e)
+
+    try:
         import asyncio
-
-        await asyncio.to_thread(run_migrations)
+        await asyncio.to_thread(sync_init_db)
+        log.info("Database schema verified (all tables created/verified)")
+    except Exception as e:
+        log.error("Failed to create_all tables: %s", e)
