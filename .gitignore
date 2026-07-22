@@ -1,0 +1,109 @@
+# ─── Byte-compiled / optimized / DLL files ─────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ─── Database ──────────────────────────────────
+*.db
+*.sqlite3
+
+# ─── Environments ──────────────────────────────
+.venv
+testenv/
+test/
+itvenv/
+venv/
+ENV/
+env/
+
+# ─── Secrets — keep all .env files out of version control ─
+.env
+.env.*
+!.env.example
+*.env
+
+
+# ─── Logs ──────────────────────────────────────
+logs/
+*.log
+streamlit_err.log
+streamlit_out.log
+err.log
+out.log
+*.tsbuildinfo
+
+# ─── Frontend (Next.js) ────────────────────────
+node_modules/
+.next/
+out/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# ─── Streamlit frontend ────────────────────────
+# (runtime caches; source files tracked)
+.streamlit/
+
+# ─── Jupyter notebooks (development artifacts) ─
+*.ipynb
+
+# ─── Trained model artifacts (reproducible) ────
+models/
+ml/models/
+**/models/
+ml_artifacts/
+*.joblib
+*.pkl
+
+# ─── Generated data / reports ──────────────────
+data/
+csvs/  # or the folder name used by generate_data.py
+*.csv
+reports/*.pdf
+reports/*.html
+
+# ─── Python packaging ──────────────────────────
+*.egg-info/
+dist/
+build/
+
+# ─── Test artifacts ────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+test_vhm.db
+
+# ─── Lint / type-check caches ──────────────────
+.ruff_cache/
+.mypy_cache/
+
+# ─── Non-production / Dev Artifacts ─────────────
+_archive/
+tests/
+.pre-commit-config.yaml
+.releaserc.json
+
+# ─── IDE ───────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── OS files ──────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Terraform ─────────────────────────────────
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/*.tfplan
+
+# ─── Monitoring ────────────────────────────────
+infra/monitoring/grafana/*.db
+infra/monitoring/prometheus/data/
+
+# ─── Generated files ───────────────────────────
+frontend/public/icons/*.generated.png

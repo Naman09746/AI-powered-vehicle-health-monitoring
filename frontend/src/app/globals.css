@@ -1,0 +1,219 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --base-bg: 8 13 20;
+  --base-surface: 15 25 36;
+  --base-elevated: 22 32 48;
+  --border: 30 48 71;
+  --accent-sky: 14 165 233;
+  --accent-green: 16 185 129;
+  --accent-amber: 245 158 11;
+  --accent-red: 239 68 68;
+  --text-primary: 240 246 255;
+  --text-muted: 141 164 196;
+}
+
+.light {
+  --base-bg: 248 250 252;
+  --base-surface: 255 255 255;
+  --base-elevated: 241 245 249;
+  --border: 226 232 240;
+  --accent-sky: 2 132 199;
+  --accent-green: 22 163 74;
+  --accent-amber: 217 119 6;
+  --accent-red: 220 38 38;
+  --text-primary: 15 23 42;
+  --text-muted: 100 116 139;
+}
+
+.light .glass-card,
+.light .glass-card-hover {
+  border-color: rgba(226, 232, 240, 0.7);
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-base text-text-primary font-body antialiased transition-colors duration-300;
+  }
+
+  h1, h2, h3, h4, h5 {
+    @apply font-heading;
+  }
+
+  ::selection {
+    background-color: rgba(var(--accent-sky), 0.2);
+    color: rgb(var(--text-primary));
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--border));
+    border-radius: 9999px;
+    transition: background-color 0.2s;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(var(--accent-sky), 0.3);
+  }
+}
+
+@layer components {
+  .glass-card {
+    background-color: rgba(var(--base-surface), 0.8);
+    backdrop-filter: blur(24px);
+    border: 1px solid rgba(var(--border), 0.5);
+    border-radius: 0.75rem;
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300;
+  }
+  
+  .glass-card-hover:hover {
+    border-color: rgba(var(--accent-sky), 0.3);
+    @apply shadow-glow;
+  }
+
+  .metric-value {
+    @apply font-heading text-2xl font-bold tracking-tight;
+  }
+
+  .metric-label {
+    @apply text-text-muted text-sm font-body;
+  }
+
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .status-dot-healthy {
+    @apply status-dot bg-accent-green shadow-[0_0_8px_rgba(16,185,129,0.5)];
+  }
+
+  .status-dot-warning {
+    @apply status-dot bg-accent-amber shadow-[0_0_8px_rgba(245,158,11,0.5)];
+  }
+
+  .status-dot-critical {
+    @apply status-dot bg-accent-red shadow-[0_0_8px_rgba(239,68,68,0.5)];
+  }
+
+  .nav-link {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-muted
+           hover:text-text-primary hover:bg-base-elevated/50 transition-all duration-200
+           text-sm font-medium;
+  }
+
+  .nav-link-active {
+    @apply nav-link;
+    color: rgb(var(--accent-sky));
+    background-color: rgba(var(--accent-sky), 0.05);
+    border: 1px solid rgba(var(--accent-sky), 0.2);
+  }
+
+  .btn-primary {
+    @apply px-4 py-2.5 text-white rounded-lg font-medium text-sm transition-all duration-200;
+    background-color: rgb(var(--accent-sky));
+    box-shadow: 0 0 20px rgba(14, 165, 233, 0.2);
+  }
+  
+  .btn-primary:hover {
+    background-color: rgba(var(--accent-sky), 0.9);
+    box-shadow: 0 0 30px rgba(14, 165, 233, 0.3);
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2.5 text-text-primary rounded-lg font-medium text-sm transition-all duration-200;
+    background-color: rgb(var(--base-elevated));
+    border: 1px solid rgba(var(--border), 0.5);
+  }
+  
+  .btn-secondary:hover {
+    background-color: rgba(var(--base-elevated), 0.7);
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2.5 text-text-muted hover:text-text-primary
+           rounded-lg font-medium text-sm transition-all duration-200;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2.5 rounded-lg text-text-primary placeholder:text-text-muted/50 transition-all duration-200 text-sm;
+    background-color: rgb(var(--base-elevated));
+    border: 1px solid rgba(var(--border), 0.5);
+  }
+  
+  .input-field:focus {
+    outline: none;
+    border-color: rgba(var(--accent-sky), 0.5);
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+
+  .badge-high {
+    @apply badge text-accent-red;
+    background-color: rgba(var(--accent-red), 0.1);
+    border: 1px solid rgba(var(--accent-red), 0.2);
+  }
+
+  .badge-medium {
+    @apply badge text-accent-amber;
+    background-color: rgba(var(--accent-amber), 0.1);
+    border: 1px solid rgba(var(--accent-amber), 0.2);
+  }
+
+  .badge-low {
+    @apply badge text-accent-sky;
+    background-color: rgba(var(--accent-sky), 0.1);
+    border: 1px solid rgba(var(--accent-sky), 0.2);
+  }
+
+  .badge-healthy {
+    @apply badge text-accent-green;
+    background-color: rgba(var(--accent-green), 0.1);
+    border: 1px solid rgba(var(--accent-green), 0.2);
+  }
+}
+
+/* Recharts dark theme overrides */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: rgba(var(--border), 0.5);
+}
+
+.recharts-text {
+  fill: rgb(var(--text-muted));
+  font-size: 0.75rem;
+}
+
+.recharts-tooltip-wrapper {
+  background-color: rgba(var(--base-surface), 0.95) !important;
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(var(--border), 0.5);
+  border-radius: 0.5rem;
+  @apply shadow-glow-lg;
+}
+
+.recharts-default-tooltip {
+  @apply !bg-transparent !border-none !p-3;
+}
+
+.recharts-legend-item-text {
+  @apply !text-text-muted;
+}

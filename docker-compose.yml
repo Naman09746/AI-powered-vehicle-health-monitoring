@@ -1,0 +1,395 @@
+# ──────────────────────────────────────────────
+# Vehicle Health Monitor — Docker Compose
+#
+# Start everything:   docker compose up -d
+# Apply migrations:   docker compose exec api alembic upgrade head
+# View logs:          docker compose logs -f
+# Stop everything:    docker compose down
+# ──────────────────────────────────────────────
+
+services:
+
+  # ── Database ──
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vehicle_health
+      POSTGRES_USER: ${DB_USER:-vhm}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-vhm_secret}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-vhm} -d vehicle_health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Connection Pooling (PgBouncer) ──
+  # PgBouncer sits between app services and PostgreSQL. It manages a pool of
+  # persistent connections to Postgres so that each app worker doesn't need its
+  # own direct connection. This reduces Postgres connection overhead and prevents
+  # connection exhaustion under load.
+  #
+  # Pool mode:    transaction  (safe for asyncpg; prepared statements are
+  #                            auto-discarded when the transaction ends)
+  # Default pool: 25 server-side connections shared across all clients
+  # Auth:         trust  (services are on an internal Docker network)
+  #
+  # App services should point DATABASE_URL at pgbouncer:6432.
+  # Alembic / admin tasks should still use postgres:5432 directly.
+  pgbouncer:
+    image: bitnami/pgbouncer:1
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_USERNAME: ${DB_USER:-vhm}
+      POSTGRESQL_PASSWORD: ${DB_PASSWORD:-vhm_secret}
+      POSTGRESQL_DATABASE: vehicle_health
+      PGBOUNCER_PORT: "6432"
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_DEFAULT_POOL_SIZE: "25"
+      PGBOUNCER_MAX_CLIENT_CONN: "100"
+      PGBOUNCER_AUTH_TYPE: trust
+      PGBOUNCER_IGNORE_STARTUP_PARAMETERS: extra_float_digits
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Cache / Task queue ──
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ── MQTT Broker ──
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    configs:
+      - source: mosquitto_config
+        target: /mosquitto/config/mosquitto.conf
+
+  # ── FastAPI Backend ──
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Direct DB connection for Alembic / admin (bypasses PgBouncer).
+      # Runtime connections use DATABASE_URL_PGBOUNCER when set.
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-vhm}:${DB_PASSWORD:-vhm_secret}@postgres:5432/vehicle_health
+      DATABASE_URL_PGBOUNCER: postgresql+asyncpg://${DB_USER:-vhm}:${DB_PASSWORD:-vhm_secret}@pgbouncer:6432/vehicle_health
+      REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Celery Worker (auto-retrain) ──
+  celery-worker:
+    build:
+      context: .
+      target: celery
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-vhm}:${DB_PASSWORD:-vhm_secret}@postgres:5432/vehicle_health
+      REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    depends_on:
+      - redis
+      - postgres
+
+  # ── Celery Beat (scheduler) ──
+  celery-beat:
+    build:
+      context: .
+      target: celery
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-vhm}:${DB_PASSWORD:-vhm_secret}@postgres:5432/vehicle_health
+      REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: ["celery", "-A", "tasks.retrain_task", "beat", "-l", "info", "--scheduler", "redbeat.RedBeatScheduler"]
+    depends_on:
+      - redis
+      - postgres
+
+  # ── MQTT Subscriber ──
+  mqtt-subscriber:
+    build:
+      context: .
+      target: mqtt
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-vhm}:${DB_PASSWORD:-vhm_secret}@postgres:5432/vehicle_health
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+    depends_on:
+      - mosquitto
+      - postgres
+
+  # ── Frontend (Next.js) ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  # ── Keycloak (OAuth2 / OIDC Provider) ──
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /
+      KC_HTTP_PORT: 8080
+      KC_PROXY: edge
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/vehicle_health
+      KC_DB_USERNAME: ${DB_USER:-vhm}
+      KC_DB_PASSWORD: ${DB_PASSWORD:-vhm_secret}
+      KC_DB_SCHEMA: public
+    ports:
+      - "8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./keycloak:/opt/keycloak/data/import:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/realms/vehicle-health/.well-known/openid-configuration"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ── MLflow Tracking Server ──
+  # Stores experiment runs, parameters, metrics, and artifact metadata.
+  # Uses PostgreSQL as the backend store (shares the existing database)
+  # and MinIO for S3-compatible artifact storage.
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.17.2
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_TRACKING_URI: http://0.0.0.0:5000
+      MLFLOW_BACKEND_STORE_URI: postgresql://${DB_USER:-vhm}:${DB_PASSWORD:-vhm_secret}@postgres:5432/vehicle_health
+      MLFLOW_ARTIFACT_ROOT: s3://mlflow-artifacts/
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command:
+      - "server"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "5000"
+      - "--backend-store-uri"
+      - "postgresql://${DB_USER:-vhm}:${DB_PASSWORD:-vhm_secret}@postgres:5432/vehicle_health"
+      - "--default-artifact-root"
+      - "s3://mlflow-artifacts/"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ── MinIO (S3-compatible artifact storage for MLflow) ──
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── MinIO bucket initialiser (runs once, then exits) ──
+  minio-setup:
+    image: minio/mc:RELEASE.2024-12-18T16-41-16Z
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      until mc ready local; do sleep 1; done;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb local/mlflow-artifacts --ignore-existing;
+      mc policy set public local/mlflow-artifacts;
+      echo 'MinIO bucket mlflow-artifacts ready.';
+      "
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # ══════════════════════════════════════════
+  # Observability Stack
+  # ══════════════════════════════════════════
+
+  # ── OpenTelemetry Collector ──
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./infra/monitoring/otel-collector/otel-collector-config.yml:/etc/otel-collector-config.yml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+
+  # ── Prometheus ──
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Grafana ──
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./infra/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Loki (log aggregation) ──
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    volumes:
+      - ./infra/monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/tmp/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Promtail (log shipper) ──
+  promtail:
+    image: grafana/promtail:latest
+    restart: unless-stopped
+    volumes:
+      - ./infra/monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+volumes:
+  pgdata:
+  mosquitto_data:
+  mosquitto_log:
+  keycloak_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+configs:
+  mosquitto_config:
+    content: |
+      listener 1883
+      allow_anonymous true
+      listener 9001
+      protocol websockets
