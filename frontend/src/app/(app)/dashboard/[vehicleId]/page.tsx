@@ -10,8 +10,10 @@ import { SensorTrendChart, sensorConfigs } from "@/components/charts/SensorTrend
 import { EmptyState } from "@/components/shared/EmptyState";
 import { motion } from "framer-motion";
 import { cn, formatNumber, getHealthColor } from "@/lib/utils";
-import { AlertTriangle, Activity, Thermometer, Gauge } from "lucide-react";
+import { AlertTriangle, Activity, Thermometer, Gauge, AlertCircle, CheckCircle, Wrench, UserCheck } from "lucide-react";
 import { useState } from "react";
+
+
 
 export default function DashboardPage() {
   const params = useParams();
@@ -146,7 +148,118 @@ export default function DashboardPage() {
         <SensorTrendChart data={readings} sensor={activeSensor} />
       </motion.div>
 
+      {/* Active OBD-II Fault Codes (DTCs) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.22 }}
+        className="glass-card p-5 mt-6"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-heading font-semibold text-text-primary flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-accent-amber" />
+            Active OBD-II Fault Codes (DTCs)
+          </h3>
+          <span className="text-xs text-text-muted">
+            {data.active_dtc_codes?.length ?? 0} active
+          </span>
+        </div>
+        {!data.active_dtc_codes || data.active_dtc_codes.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm text-accent-green bg-accent-green/10 border border-accent-green/20 p-3 rounded-lg">
+            <CheckCircle className="w-4 h-4" />
+            <span>No active Diagnostic Trouble Codes (DTCs) detected. Vehicle operating cleanly.</span>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-3">
+            {data.active_dtc_codes.map((dtc: { code: string; description: string }) => (
+              <div key={dtc.code} className="p-3 rounded-lg border border-accent-amber/30 bg-accent-amber/5 flex items-start gap-3">
+                <span className="font-mono font-bold text-xs px-2.5 py-1 bg-accent-amber/20 text-accent-amber rounded border border-accent-amber/30">
+                  {dtc.code}
+                </span>
+                <div className="text-xs">
+                  <div className="font-semibold text-text-primary">{dtc.description}</div>
+                  <div className="text-text-muted text-[11px] mt-0.5">OBD-II Diagnostic System</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+
+
+      {/* Driver Score & Maintenance Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+        {/* Driver Behavior Score Card */}
+        {data.driver_score && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.24 }}
+            className="glass-card p-5"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-heading font-semibold text-text-primary flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-accent-sky" />
+                Driver Behavior Analysis
+              </h3>
+              <span className="text-xs px-2.5 py-1 rounded bg-accent-sky/10 text-accent-sky border border-accent-sky/20 font-medium">
+                {data.driver_score.rating}
+              </span>
+            </div>
+            <div className="flex items-center justify-between p-4 rounded-xl bg-base-surface/40 border border-border/30 mb-4">
+              <div>
+                <div className="text-xs text-text-muted">Behavior Score</div>
+                <div className="text-3xl font-extrabold font-heading text-accent-sky mt-0.5">
+                  {data.driver_score.score}/100
+                </div>
+              </div>
+              <div className="text-right text-xs space-y-1 text-text-muted">
+                <div>Harsh Accel Events: <span className="font-semibold text-text-primary">{data.driver_score.harsh_acceleration_events}</span></div>
+                <div>Over-Rev Events: <span className="font-semibold text-text-primary">{data.driver_score.over_rev_events}</span></div>
+                <div>Excessive Idling: <span className="font-semibold text-text-primary">{data.driver_score.excessive_idle_count}</span></div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Upcoming Maintenance Schedule Card */}
+        {data.upcoming_maintenance && data.upcoming_maintenance.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.26 }}
+            className="glass-card p-5"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-heading font-semibold text-text-primary flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-accent-amber" />
+                Upcoming Maintenance Forecast
+              </h3>
+              <span className="text-xs text-text-muted">Proactive Service</span>
+            </div>
+            <div className="space-y-2.5">
+              {data.upcoming_maintenance.slice(0, 3).map((m: any, i: number) => (
+                <div key={i} className="flex items-center justify-between p-3 rounded-lg border border-border/30 bg-base-surface/40 text-xs">
+                  <div className="font-medium text-text-primary">{m.service_type}</div>
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "px-2 py-0.5 rounded text-[11px] font-medium",
+                      m.status === "overdue" ? "bg-accent-red/10 text-accent-red border border-accent-red/20" :
+                      m.status === "due_soon" ? "bg-accent-amber/10 text-accent-amber border border-accent-amber/20" :
+                      "bg-accent-green/10 text-accent-green border border-accent-green/20"
+                    )}>
+                      {m.urgency_msg}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </div>
+
       {/* Alerts */}
+
       {alerts && alerts.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}

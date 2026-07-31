@@ -11,8 +11,9 @@ import { HealthGauge } from "@/components/charts/HealthGauge";
 import { motion } from "framer-motion";
 import { cn, formatNumber, getFailureColor, getHealthColor } from "@/lib/utils";
 import type { PredictionResult } from "@/lib/validation";
-import { AlertTriangle, CheckCircle, BarChart3, Zap, Activity, Bell } from "lucide-react";
+import { AlertTriangle, CheckCircle, BarChart3, Zap, Activity, Bell, Clock } from "lucide-react";
 import { NextStepCard } from "@/components/shared/NextStepCard";
+
 
 export default function PredictionsPage() {
   const params = useParams();
@@ -142,8 +143,34 @@ export default function PredictionsPage() {
         </div>
       )}
 
+      {/* RUL Forecast Banner */}
+      {dashboard?.rul && dashboard.rul.rul_days != null && (
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass-card p-5 mb-8 border-l-4 border-l-accent-sky"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-accent-sky/10 border border-accent-sky/20 flex items-center justify-center text-accent-sky flex-shrink-0">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-heading font-semibold text-text-primary text-sm">Remaining Useful Life (RUL) Forecast</h3>
+                <p className="text-text-muted text-xs mt-0.5">{dashboard.rul.message}</p>
+              </div>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <div className="text-xl font-bold font-heading text-accent-sky">~{dashboard.rul.rul_days} Days</div>
+              <div className="text-xs text-text-muted">~{dashboard.rul.estimated_km_remaining} km remaining</div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Dual Gauges */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

@@ -10,8 +10,10 @@ import {
   ResponsiveContainer,
   ReferenceLine,
   ReferenceArea,
+  Brush,
 } from "recharts";
 import { formatTimestamp } from "@/lib/utils";
+
 
 interface SensorConfig {
   key: string;
@@ -86,7 +88,17 @@ export function SensorTrendChart({ data, sensor }: SensorTrendChartProps) {
             dot={false}
             activeDot={{ r: 4, fill: "#0ea5e9" }}
           />
+          {data.length > 5 && (
+            <Brush
+              dataKey="timestamp"
+              height={22}
+              stroke="#0ea5e9"
+              fill="rgba(15, 25, 36, 0.8)"
+              tickFormatter={(v) => formatTimestamp(v)}
+            />
+          )}
         </LineChart>
+
       </ResponsiveContainer>
     </div>
   );

@@ -191,11 +191,17 @@ export default function HistoryPage() {
         <div className={cn("space-y-3", showForm ? "lg:col-span-2" : "lg:col-span-3")}>
           {recordList.length === 0 ? (
             <EmptyState
-              icon={<History className="w-16 h-16" />}
-              title="No records registered"
-              description="Keep track of repairs, replacements, and services to optimize predictive models."
+              icon={<History className="w-16 h-16 text-accent-sky/40" />}
+              title="No maintenance records found"
+              description="Keep track of repairs, replacements, and services to optimize predictive failure models."
+              action={
+                <button onClick={() => setShowForm(true)} className="btn-primary mt-2 flex items-center gap-2">
+                  <Plus className="w-4 h-4" /> Log First Maintenance Service
+                </button>
+              }
             />
           ) : (
+
             <div className="space-y-3">
               {recordList.map((r: any, i: number) => (
                 <motion.div

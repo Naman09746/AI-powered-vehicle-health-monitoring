@@ -242,13 +242,50 @@ make fleet            # Start a fleet simulator (5 vehicles)
 make generate-data    # Generate sample sensor readings CSV file
 make clean            # Remove caches, log files, and test databases
 ```
-./.venv/bin/python -m simulator.obd_simulator --vehicle-id HR-1234 --profile dynamic --interval 1 --username Naman0313 --password admin123 --api-url https://vehicle-health-api-ypj8.onrender.com/api/v1
+python simulator/obd_simulator.py \
+  --vehicle-id VH-001 \
+  --profile dynamic \
+  --interval 5 \
+  --http \
+  --api-url https://vehicle-health-api-ypj8.onrender.com/api/v1 \
+  --username <USER_USERNAME> \
+  --password <USER_PASSWORD>
 
+---
 
-git remote set-url origin https://github.com/Naman09746/AI-powered-vehicle-health-monitoring.git
+## 🚀 Environment Promotion & v3.0 Deployment Workflow
 
-git add -A
+### Environment Branching Strategy
+```
+main       → Production (Vercel Production + Render Prod DB)
+staging    → Staging (Vercel Preview + Render Staging DB)
+feature/*  → Local Development
+```
 
-git commit -m "fix: CORS config, service worker clone bug, PWA icon, and initial project setup"
+### Staging vs Production Setup
+1. **Local Development**: `ENVIRONMENT=development` (local SQLite/PostgreSQL, local Next.js frontend)
+2. **Staging Environment**: `ENVIRONMENT=staging` (Render staging web service + Vercel preview deployment)
+3. **Production Deployment**: `ENVIRONMENT=production` (Render production web service + Vercel production deployment)
 
-git push -u origin main --force
+### Automated Tasks & Maintenance
+- **Data Cleanup**: Automatically run `python tasks/cleanup.py` daily via Render Cron Job to prune sensor readings older than 90 days.
+- **Database Backup**: Automatically run `python scripts/backup_db.py` weekly via Render Cron Job to backup SQL dumps to secret GitHub Gists.
+- **Sentry Monitoring**: Configure `SENTRY_DSN` in Render env variables to capture production exceptions with 10% trace sampling.
+
+---
+
+## 🏆 Vehicle Health Monitor v3.0 Architecture Summary
+
+| Feature Area | Key Innovations |
+|---|---|
+| **Public Landing Page** | Fully responsive SSR landing page with hero CTA, feature matrix, and onboarding banners. |
+| **Vehicle Health Score** | Dynamic 0–100 score computed from real-time sensor telemetry deviation. |
+| **OBD-II DTC Fault Codes** | P0300, P0171, P0128 fault codes with plain-English diagnostics and UI warning badges. |
+| **Anomaly Detection ML** | Unsupervised `IsolationForest` model to detect novel sensor anomalies before failure labels exist. |
+| **RUL Prediction Timeline** | Extrapolates sensor degradation trends to predict remaining useful operating days & mileage. |
+| **Driver Behavior Score** | 0–100 driver rating evaluating harsh acceleration, over-revving, and excessive idling. |
+| **Maintenance Forecasting** | Predictive service scheduling (oil change, fluid flush, brake inspection) with status badges. |
+| **Real-Time Alert Toasts** | Instantaneous in-app WebSocket alert notifications across all dashboard views. |
+| **Dark / Light Mode** | System-aware color theme toggle with zero-flash persistence. |
+| **Enterprise Security & Rate Limiting** | slowapi rate limiting (`10/min` login), AuditLog governance, OAuth2 social login, and MFA/TOTP. |
+

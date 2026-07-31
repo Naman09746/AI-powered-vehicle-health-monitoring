@@ -7,12 +7,18 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { ToastContainer } from "@/components/shared/ToastContainer";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { useAlertToasts } from "@/hooks/useAlertToasts";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
+  const selectedVehicleId = useAuthStore((s) => s.selectedVehicleId);
   const [hydrated, setHydrated] = useState(false);
   const [showSpinner, setShowSpinner] = useState(false);
+
+  // Enable real-time WebSocket alert toasts for currently selected vehicle
+  useAlertToasts(selectedVehicleId);
+
 
   useEffect(() => {
     // Wait for Zustand persist to hydrate from localStorage

@@ -5,11 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authApi } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
+import { useToast } from "@/store/toastStore";
 import { motion } from "framer-motion";
+import { GoogleLogin } from "@react-oauth/google";
 
 export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const toast = useToast();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -28,7 +31,12 @@ export default function LoginPage() {
         name: data.name ?? null,
         role: data.role,
       });
-      router.replace("/fleet");
+      // Route new users to onboarding wizard on first login
+      if (data.onboarding_complete === false) {
+        router.replace("/onboarding");
+      } else {
+        router.replace("/fleet");
+      }
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(detail ?? "Login failed. Check your credentials.");
@@ -129,9 +137,14 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-text-muted mb-1.5">
-                Password
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="password" className="block text-sm font-medium text-text-muted">
+                  Password
+                </label>
+                <Link href="/forgot-password" className="text-xs text-accent-sky hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 id="password"
                 type="password"
@@ -148,12 +161,50 @@ export default function LoginPage() {
             </button>
           </form>
 
+          <div className="mt-6">
+            <div className="relative flex items-center justify-center mb-4">
+              <div className="border-t border-border/40 w-full" />
+              <span className="bg-base px-3 text-xs text-text-muted">or</span>
+              <div className="border-t border-border/40 w-full" />
+            </div>
+
+            <div className="w-full flex justify-center">
+              <GoogleLogin
+                onSuccess={async (credentialResponse) => {
+                  try {
+                    const res = await authApi.googleLogin(credentialResponse.credential!);
+                    const token = res.data.token || res.data.access_token;
+                    const user = res.data.user || {
+                      id: res.data.user_id,
+                      username: res.data.username,
+                      name: res.data.name,
+                      role: res.data.role || "driver",
+                    };
+                    setAuth(token, user);
+                    toast.add("Successfully signed in with Google!", "success");
+                    router.push("/dashboard");
+                  } catch (err: any) {
+                    toast.add(err.response?.data?.detail || "Google sign-in failed", "error");
+                  }
+                }}
+                onError={() => {
+                  toast.add("Google Login Failed", "error");
+                }}
+                useOneTap
+                theme="outline"
+                size="large"
+                shape="rectangular"
+              />
+            </div>
+          </div>
+
           <p className="mt-6 text-center text-sm text-text-muted">
             Don't have an account?{" "}
             <Link href="/register" className="text-accent-sky hover:underline">
               Create one
             </Link>
           </p>
+
         </motion.div>
       </div>
     </div>

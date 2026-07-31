@@ -3,39 +3,53 @@ import { useParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { useModels, useTrainModel, usePromoteModel } from "@/hooks/useML";
+import { useTrainModel, usePromoteModel } from "@/hooks/useML";
 import { useToast } from "@/store/toastStore";
-import { useQueryClient } from "@tanstack/react-query";
 import { mlApi } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Brain, Zap, Trophy, BarChart3, AlertTriangle, Trash2 } from "lucide-react";
+import { Brain, Zap, Trophy, BarChart3, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { TrainedModel } from "@/lib/validation";
 import { NextStepCard } from "@/components/shared/NextStepCard";
 
 export default function TrainingPage() {
   const params = useParams();
   const vehicleId = Number(params.vehicleId);
-  const { data: models, isLoading, refetch } = useModels(vehicleId);
   const train = useTrainModel();
   const promote = usePromoteModel();
-  const queryClient = useQueryClient();
   const toast = useToast();
+  const [models, setModels] = useState<TrainedModel[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [tuning, setTuning] = useState("quick");
+  const [trainedSuccessfully, setTrainedSuccessfully] = useState(false);
+
+  const fetchModels = useCallback(async () => {
+    if (!vehicleId) return;
+    try {
+      const r = await mlApi.models(vehicleId);
+      console.log('[training] raw models response:', r.data);
+      setModels(Array.isArray(r.data) ? r.data : []);
+    } catch (err) {
+      console.error('[training] fetchModels error:', err);
+      setModels([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [vehicleId]);
+
+  useEffect(() => { fetchModels(); }, [fetchModels]);
 
   const handleDeleteModel = useCallback(async (modelId: number) => {
     if (!confirm("Are you sure you want to delete this model?")) return;
     try {
       await mlApi.deleteModel(modelId);
       toast.add("Model deleted successfully", "success");
-      queryClient.invalidateQueries({ queryKey: ["models", vehicleId] });
-      refetch();
+      fetchModels();
     } catch {
       toast.add("Failed to delete model", "error");
     }
-  }, [vehicleId, toast, queryClient, refetch]);
-  const [tuning, setTuning] = useState("quick");
-  const [trainedSuccessfully, setTrainedSuccessfully] = useState(false);
+  }, [toast, fetchModels]);
 
   if (isLoading) return <LoadingSpinner size="lg" />;
 
@@ -45,14 +59,20 @@ export default function TrainingPage() {
       const r = await train.mutateAsync({ vehicleId, tuningMode: tuning });
       toast.add(`Model trained: ${r.best_model}`, "success");
       setTrainedSuccessfully(true);
-    } catch { toast.add("Training failed", "error"); }
+      await fetchModels();
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.add(detail ? `Training failed: ${detail}` : "Training failed", "error");
+    }
   };
 
   const handlePromote = async (modelId: number) => {
-    try { await promote.mutateAsync({ modelId, vehicleId }); toast.add("Champion promoted", "success"); }
-    catch { toast.add("Failed to promote", "error"); }
+    try {
+      await promote.mutateAsync({ modelId, vehicleId });
+      toast.add("Champion promoted", "success");
+      fetchModels();
+    } catch { toast.add("Failed to promote", "error"); }
   };
-
   if (!models || models.length === 0) {
     return (
       <div>

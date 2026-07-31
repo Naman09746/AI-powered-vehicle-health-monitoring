@@ -63,9 +63,35 @@ export const dashboardDataSchema = z.object({
   recent_readings: z.array(sensorReadingSchema),
   health_score: z.number().nullable(),
   health_band: z.string().nullable(),
+  active_dtc_codes: z.array(z.object({ code: z.string(), description: z.string() })).optional(),
+  anomaly_status: z.record(z.unknown()).optional(),
+  location: z.object({ lat: z.number(), lng: z.number() }).optional(),
+  trip_route: z.array(z.object({ lat: z.number(), lng: z.number() })).optional(),
+  rul: z.object({
+    rul_days: z.number().nullable().optional(),
+    estimated_km_remaining: z.number().optional(),
+    degradation_rate_per_day: z.number().optional(),
+    urgency: z.string().optional(),
+    message: z.string().optional(),
+  }).optional(),
+  driver_score: z.object({
+    score: z.number(),
+    rating: z.string(),
+    harsh_acceleration_events: z.number(),
+    over_rev_events: z.number(),
+    excessive_idle_count: z.number(),
+  }).optional(),
+  upcoming_maintenance: z.array(z.object({
+    service_type: z.string(),
+    due_date: z.string(),
+    status: z.string(),
+    urgency_msg: z.string(),
+    interval_km: z.number(),
+  })).optional(),
   active_alerts: z.number(),
   total_readings: z.number(),
 });
+
 
 // ── ML Models ──
 

@@ -131,8 +131,9 @@ export function Sidebar() {
           })}
         </nav>
         <div className="px-5 py-4 border-t border-border/30 flex-shrink-0">
-          <div className="text-[10px] text-text-muted/50 tracking-wider">v2.0.0 • AI-Powered</div>
+          <div className="text-[10px] text-text-muted/50 tracking-wider">v3.0 • AI-Powered</div>
         </div>
+
       </aside>
     </>
   );

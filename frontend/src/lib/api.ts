@@ -4,6 +4,14 @@ import { useAuthStore } from "@/store/authStore";
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 export const API_BASE_URL = rawApiUrl.replace(/\/+$/, "");
 
+export function getApiWsUrl(vehicleId: number): string {
+  const isHttps = API_BASE_URL.startsWith("https:");
+  const wsProtocol = isHttps ? "wss:" : "ws:";
+  const host = API_BASE_URL.replace(/^https?:\/\//, "");
+  return `${wsProtocol}//${host}/simulator/stream/${vehicleId}`;
+}
+
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: { "Content-Type": "application/json" },
@@ -38,6 +46,8 @@ export const authApi = {
     api.post("/auth/login", { username, password }),
   register: (data: { username: string; password: string; name?: string; email?: string }) =>
     api.post("/auth/register", data),
+  googleLogin: (credential: string) =>
+    api.post("/auth/oauth/google", { credential }),
   me: () => api.get("/auth/me"),
 };
 
