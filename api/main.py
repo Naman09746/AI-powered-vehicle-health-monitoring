@@ -100,6 +100,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Store for access in routers
     app.state.redis_client = redis_client
 
+    import os
+    if os.getenv("AUTO_SIMULATE", "false").lower() == "true":
+        from api.routers.simulator import start_fleet_simulation
+        log.info("AUTO_SIMULATE enabled. Booting background fleet simulation...")
+        start_fleet_simulation()
+
     yield  # ── App runs here ──
 
     # Shutdown
@@ -111,7 +117,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     log.info("Database connections closed")
 
 
+# ── Sentry Error Tracking Initialization ─────────────────────
+import os
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+            traces_sample_rate=0.1,
+            environment=os.getenv("ENVIRONMENT", "development"),
+        )
+        log.info("Sentry SDK initialized for environment: %s", os.getenv("ENVIRONMENT", "development"))
+    except Exception as exc:
+        log.warning("Sentry init skipped: %s", exc)
+
+
 # ── FastAPI app ───────────────────────────────────────────────
+
 
 app = FastAPI(
     title=APP_CONFIG["page_title"] + " API",
@@ -215,10 +242,16 @@ async def ws_vehicle_live(websocket: WebSocket, vehicle_id: int):
 # ── Root ─────────────────────────────────────────────────────
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
         "service": APP_CONFIG["page_title"] + " API",
         "version": "3.0.0",
         "docs": "/api/docs",
     }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
+

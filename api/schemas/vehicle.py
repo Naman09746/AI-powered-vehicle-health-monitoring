@@ -33,6 +33,8 @@ class LoginResponse(BaseModel):
     username: str
     role: str
     name: str | None = None
+    onboarding_complete: bool = False
+
 
     model_config = {
         "json_schema_extra": {
@@ -127,6 +129,9 @@ class VehicleResponse(BaseModel):
     mileage: float | None = None
     last_service_date: date | None = None
     created_at: datetime | None = None
+    health_score: int | None = 100
+    health_status: str | None = "good"
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

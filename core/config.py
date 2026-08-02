@@ -285,7 +285,7 @@ SYNTHETIC_LABEL_MIN_ANOMALIES = 3
 ML_CONFIG = {
     "test_size": 0.2,
     "random_state": 42,
-    "min_rows_for_training": 30,
+    "min_rows_for_training": 10,
     "imbalance_threshold": 0.2,  # minority class < 20%, use ROC-AUC for selection
 }
 

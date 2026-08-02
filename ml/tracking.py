@@ -26,12 +26,37 @@ log = logging.getLogger("ml.tracking")
 # ---------------------------------------------------------------------------
 # Lazy import so the module can be loaded even when mlflow isn't installed
 # ---------------------------------------------------------------------------
+def _is_uri_reachable(uri: str) -> bool:
+    """Check if local tracking URI is reachable before attempting MLflow calls."""
+    if "localhost" in uri or "127.0.0.1" in uri:
+        import socket
+        try:
+            port = 5000
+            if ":" in uri.split("//")[-1]:
+                port = int(uri.split(":")[-1].split("/")[0])
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.3)
+            res = sock.connect_ex(("127.0.0.1", port))
+            sock.close()
+            return res == 0
+        except Exception:
+            return False
+    return True
+
+
 def _import_mlflow():
     """Import mlflow and configure it. Returns the module or None."""
     try:
         import mlflow
     except ImportError:
         log.info("mlflow package not installed — tracking is disabled")
+        return None
+
+    os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = "0"
+    os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "1"
+
+    if not _is_uri_reachable(MLFLOW_TRACKING_URI):
+        log.info("MLflow server at %s is not active — tracking disabled", MLFLOW_TRACKING_URI)
         return None
 
     try:

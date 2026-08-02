@@ -7,24 +7,27 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-
-import core.db as database
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from api.limiter import limiter
 from api.dependencies import get_current_user
 from api.schemas.vehicle import SensorReadingIn, SensorReadingResponse
+import core.db as database
 from core.logger import get_logger
 
-log = get_logger("api_readings")
+log = get_logger("readings.router")
 
 router = APIRouter(prefix="/api/v1/vehicles/{vehicle_id}/readings", tags=["readings"])
 
 
 @router.post("", status_code=201)
+@limiter.limit("120/minute")
 async def ingest_reading(
+    request: Request,
     vehicle_id: int,
     body: SensorReadingIn,
     user: dict[str, Any] = Depends(get_current_user),
 ):
+
     """Ingest a single sensor reading for a vehicle."""
     # Verify vehicle access
     vehicle = database.get_vehicle_by_id(vehicle_id, user["id"])

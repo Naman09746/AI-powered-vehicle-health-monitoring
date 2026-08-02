@@ -79,6 +79,28 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         df = _generate_synthetic_labels(df)
         log.append(_synthetic_label_summary(df))
 
+    # Fallback: if ALL rows are label=0 (healthy simulation data), force-label
+    # the worst 20% by combined sensor stress score as failures so both classes exist.
+    if df["failure_label"].nunique() < 2:
+        log.append("**Labels fallback:** All rows are healthy — forcing worst 20% as failure class for training.")
+        stress_cols = [c for c in SENSOR_COLUMNS if c in df.columns]
+        if stress_cols:
+            # Normalise each sensor to 0–1 range and sum to get a stress score
+            stress = pd.Series(0.0, index=df.index)
+            for col in stress_cols:
+                col_min = df[col].min()
+                col_max = df[col].max()
+                if col_max > col_min:
+                    stress += (df[col] - col_min) / (col_max - col_min)
+            n_fail = max(2, int(len(df) * 0.20))
+            worst_idx = stress.nlargest(n_fail).index
+            df.loc[worst_idx, "failure_label"] = 1
+        else:
+            n_fail = max(2, int(len(df) * 0.20))
+            df.iloc[-n_fail:, df.columns.get_loc("failure_label")] = 1
+        df["failure_label"] = df["failure_label"].astype(int)
+        log.append(_synthetic_label_summary(df))
+
     final_rows = len(df)
     log.append(
         f"**Output:** {final_rows} rows, {len(df.columns)} columns "

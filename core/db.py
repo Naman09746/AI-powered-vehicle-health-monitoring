@@ -15,7 +15,7 @@ from functools import wraps
 from typing import Any
 
 def utcnow():
-    return datetime.datetime.now(timezone.utc)
+    return datetime.datetime.utcnow()
 
 from sqlalchemy import (
     Boolean,
@@ -100,7 +100,7 @@ else:
         pool_recycle=3600,
     )
 
-SessionLocal = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 @contextmanager
@@ -153,7 +153,17 @@ class User(Base):
     )  # admin | fleet_manager | technician | driver
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     is_active = Column(Boolean, default=True)
+    onboarding_complete = Column(Boolean, default=False)
+    email_verified = Column(Boolean, default=False)
+    email_verify_token = Column(String, nullable=True)
+    reset_token = Column(String, nullable=True)
+    reset_token_expiry = Column(DateTime, nullable=True)
+    google_id = Column(String, nullable=True, unique=True)
+    totp_secret = Column(String, nullable=True)
+    totp_enabled = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow)
+
+
 
     vehicles = relationship(
         "Vehicle", back_populates="user", cascade="all, delete-orphan"
@@ -324,6 +334,11 @@ class SensorReading(Base):
     speed = Column(Float)
     engine_load = Column(Float)
     failure_label = Column(Integer)  # 0 or 1
+    dtc_codes = Column(Text, nullable=True)  # JSON string of DTC codes e.g. '["P0300", "P0171"]'
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+
 
     upload = relationship("SensorUpload", back_populates="readings")
     vehicle = relationship("Vehicle", back_populates="readings")
@@ -797,14 +812,24 @@ def get_sensor_readings(
             readings = query.all()
 
         if not readings:
+            query_fb = session.query(SensorReading).filter_by(vehicle_id=vehicle_id)
+            if upload_id:
+                query_fb = query_fb.filter_by(upload_id=upload_id)
+            if limit is not None:
+                readings = list(reversed(query_fb.order_by(SensorReading.timestamp.desc()).limit(limit).all()))
+            else:
+                readings = query_fb.order_by(SensorReading.timestamp.asc()).all()
+
+        if not readings:
             return pd.DataFrame()
 
         data = []
         for r in readings:
+            ts = r.timestamp
             data.append(
                 {
                     "id": r.id,
-                    "timestamp": r.timestamp,
+                    "timestamp": ts.isoformat() if ts else None,
                     "engine_temp": r.engine_temp,
                     "oil_pressure": r.oil_pressure,
                     "coolant_temp": r.coolant_temp,
@@ -823,16 +848,73 @@ def get_sensor_readings(
         session.close()
 
 
-def get_uploads_for_vehicle(vehicle_id: int, user_id: int) -> list[SensorUpload]:
-    """Get all uploads for a vehicle."""
+def get_latest_reading_dict(vehicle_id: int, user_id: int) -> dict | None:
+    """Get the single most recent sensor reading for a vehicle as a dict."""
     session = get_session()
     try:
-        return (
+        r = (
+            session.query(SensorReading)
+            .filter_by(vehicle_id=vehicle_id, user_id=user_id)
+            .order_by(SensorReading.timestamp.desc())
+            .first()
+        )
+        if not r:
+            return None
+        return {
+            "id": r.id,
+            "timestamp": r.timestamp,
+            "engine_temp": r.engine_temp,
+            "oil_pressure": r.oil_pressure,
+            "coolant_temp": r.coolant_temp,
+            "engine_rpm": r.engine_rpm,
+            "vibration": r.vibration,
+            "fuel_consumption": r.fuel_consumption,
+            "battery_voltage": r.battery_voltage,
+            "tire_pressure": r.tire_pressure,
+            "speed": r.speed,
+            "engine_load": r.engine_load,
+            "failure_label": r.failure_label,
+        }
+    finally:
+        session.close()
+
+
+
+def get_uploads_for_vehicle(vehicle_id: int, user_id: int) -> list[dict[str, Any]]:
+    """Get all uploads for a vehicle with dynamic row counts."""
+    session = get_session()
+    try:
+        uploads = (
             session.query(SensorUpload)
             .filter_by(vehicle_id=vehicle_id, user_id=user_id)
             .order_by(SensorUpload.upload_time.desc())
             .all()
         )
+        if not uploads:
+            uploads = (
+                session.query(SensorUpload)
+                .filter_by(vehicle_id=vehicle_id)
+                .order_by(SensorUpload.upload_time.desc())
+                .all()
+            )
+
+        res = []
+        for u in uploads:
+            actual_count = (
+                session.query(SensorReading)
+                .filter_by(upload_id=u.id)
+                .count()
+            )
+            count = actual_count if actual_count > 0 else (u.row_count_raw or 0)
+            res.append({
+                "id": u.id,
+                "filename": u.filename,
+                "row_count_raw": count,
+                "row_count_clean": count,
+                "upload_time": u.upload_time.isoformat() if u.upload_time else None,
+                "vehicle_id": u.vehicle_id,
+            })
+        return res
     finally:
         session.close()
 
@@ -870,6 +952,7 @@ def save_trained_model(
         session.add(tm)
         session.commit()
         session.refresh(tm)
+        session.expunge(tm)
         return tm
     except Exception:
         session.rollback()
@@ -992,6 +1075,7 @@ def save_prediction(
         session.add(pred)
         session.commit()
         session.refresh(pred)
+        session.expunge(pred)
         return pred
     except Exception:
         session.rollback()

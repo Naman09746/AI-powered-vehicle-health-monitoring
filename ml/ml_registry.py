@@ -88,16 +88,22 @@ class ModelRegistry:
                 if model is None:
                     log.error("Registered model %s not found for update", tm.id)
                     return None
+                # Demote any existing champion for this vehicle
+                session.query(database.TrainedModel).filter(
+                    database.TrainedModel.vehicle_id == vehicle_id
+                ).update({"is_champion": False, "is_best": False})
+
                 model.model_version = current_version
                 model.training_data_hash = data_hash
                 model.feature_columns_json = json.dumps(
                     model_result.get("feature_columns", [])
                 )
-                model.is_champion = False
+                model.is_champion = True
+                model.is_best = True
                 model.challenger_vs_champion_delta = delta
                 session.commit()
                 log.info(
-                    "Registered model v%s for vehicle %s (delta=%s)",
+                    "Registered model v%s as champion for vehicle %s (delta=%s)",
                     current_version,
                     vehicle_id,
                     delta,
@@ -123,8 +129,6 @@ class ModelRegistry:
             # Demote current champion(s)
             session.query(database.TrainedModel).filter(
                 database.TrainedModel.vehicle_id == vehicle_id,
-                database.TrainedModel.user_id == user_id,
-                database.TrainedModel.is_champion,
             ).update({"is_champion": False, "is_best": False})
 
             # Promote the selected model
@@ -133,7 +137,6 @@ class ModelRegistry:
                 .filter_by(
                     id=model_id,
                     vehicle_id=vehicle_id,
-                    user_id=user_id,
                 )
                 .first()
             )
@@ -159,38 +162,28 @@ class ModelRegistry:
             session.close()
 
     def get_champion(
-        self, vehicle_id: int, user_id: int
+        self, vehicle_id: int, user_id: int | None = None
     ) -> database.TrainedModel | None:
         """
         Get the current champion model for a vehicle.
 
-        Falls back to ``is_best`` if no champion flag is set (legacy).
+        Falls back to latest model for the vehicle if no champion flag is set.
         """
         session = database.get_session()
         try:
-            model = (
-                session.query(database.TrainedModel)
-                .filter_by(
-                    vehicle_id=vehicle_id,
-                    user_id=user_id,
-                    is_champion=True,
-                )
-                .order_by(database.TrainedModel.trained_at.desc())
-                .first()
-            )
-            if model:
-                return model
-            # Fallback to legacy is_best flag
-            return (
-                session.query(database.TrainedModel)
-                .filter_by(
-                    vehicle_id=vehicle_id,
-                    user_id=user_id,
-                    is_best=True,
-                )
-                .order_by(database.TrainedModel.trained_at.desc())
-                .first()
-            )
+            q = session.query(database.TrainedModel).filter_by(vehicle_id=vehicle_id)
+            res = None
+            if user_id:
+                res = q.filter_by(user_id=user_id, is_champion=True).order_by(database.TrainedModel.trained_at.desc()).first()
+            if not res:
+                res = q.filter_by(is_champion=True).order_by(database.TrainedModel.trained_at.desc()).first()
+            if not res:
+                res = q.filter_by(is_best=True).order_by(database.TrainedModel.trained_at.desc()).first()
+            if not res:
+                res = q.order_by(database.TrainedModel.trained_at.desc()).first()
+            if res:
+                session.expunge(res)
+            return res
         finally:
             session.close()
 
@@ -198,7 +191,7 @@ class ModelRegistry:
         """List all model versions for a vehicle, newest first."""
         session = database.get_session()
         try:
-            return (
+            res = (
                 session.query(database.TrainedModel)
                 .filter_by(
                     vehicle_id=vehicle_id,
@@ -207,6 +200,14 @@ class ModelRegistry:
                 .order_by(database.TrainedModel.trained_at.desc())
                 .all()
             )
+            if not res:
+                res = (
+                    session.query(database.TrainedModel)
+                    .filter_by(vehicle_id=vehicle_id)
+                    .order_by(database.TrainedModel.trained_at.desc())
+                    .all()
+                )
+            return res
         finally:
             session.close()
 

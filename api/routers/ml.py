@@ -29,7 +29,17 @@ async def train(
 
     df = await sync_to_async(database.get_sensor_readings, vehicle_id, user["id"])
     if df.empty:
-        raise HTTPException(status_code=400, detail="No sensor data available.")
+        try:
+            from api.routers.simulator import ensure_vehicle_simulation
+            v = database.get_vehicle_by_id(vehicle_id, user["id"])
+            v_name = v.vehicle_id_display if v else f"VH-{vehicle_id}"
+            ensure_vehicle_simulation(vehicle_id, user["id"], v_name)
+            df = await sync_to_async(database.get_sensor_readings, vehicle_id, user["id"])
+        except Exception:
+            pass
+
+    if df.empty:
+        raise HTTPException(status_code=400, detail="No sensor data available for this vehicle.")
 
     df_clean, log_entries = await sync_to_async(preprocess, df)
     valid, msg = await sync_to_async(_validate, df_clean)
@@ -89,6 +99,52 @@ async def train(
     }
 
 
+@router.post("/train-anomaly/{vehicle_id}")
+async def train_anomaly_route(
+    vehicle_id: int,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Train unsupervised IsolationForest anomaly detection model for a vehicle."""
+    from api.dependencies import sync_to_async
+    from ml.anomaly import train_anomaly_model
+
+    df = await sync_to_async(database.get_sensor_readings, vehicle_id, user["id"])
+    if df.empty:
+        raise HTTPException(status_code=400, detail="No sensor data available for anomaly training.")
+
+    res = await sync_to_async(train_anomaly_model, df, vehicle_id, user["id"])
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Anomaly training failed."))
+
+    return res
+
+
+
+def _serialize_model(m: Any) -> dict[str, Any]:
+    if isinstance(m, dict):
+        return m
+    trained_at = getattr(m, "trained_at", None)
+    if trained_at and hasattr(trained_at, "isoformat"):
+        trained_at_str = trained_at.isoformat()
+    elif trained_at:
+        trained_at_str = str(trained_at)
+    else:
+        trained_at_str = None
+
+    return {
+        "id": getattr(m, "id", None),
+        "model_name": getattr(m, "model_name", "classifier") or "classifier",
+        "model_version": getattr(m, "model_version", None),
+        "accuracy": getattr(m, "accuracy", None),
+        "f1": getattr(m, "f1", None),
+        "roc_auc": getattr(m, "roc_auc", None),
+        "is_champion": bool(getattr(m, "is_champion", False)),
+        "trained_at": trained_at_str,
+        "vehicle_id": getattr(m, "vehicle_id", None),
+    }
+
+
+
 @router.get("/models")
 async def list_models(
     vehicle_id: int | None = None,
@@ -97,9 +153,10 @@ async def list_models(
     """List trained models, optionally filtered by vehicle."""
     if vehicle_id:
         from ml.ml_registry import registry
-
-        return registry.list_models(vehicle_id, user["id"])
-    return database.get_all_trained_models(user["id"])
+        models = registry.list_models(vehicle_id, user["id"])
+    else:
+        models = database.get_all_trained_models(user["id"])
+    return [_serialize_model(m) for m in models]
 
 
 @router.get("/models/{vehicle_id}")
@@ -109,8 +166,39 @@ async def list_vehicle_models(
 ):
     """List all model versions for a vehicle."""
     from ml.ml_registry import registry
+    try:
+        models = registry.list_models(vehicle_id, user["id"])
+        log.info("list_vehicle_models: found %d models for vehicle %s user %s", len(models), vehicle_id, user["id"])
+        return [_serialize_model(m) for m in models]
+    except Exception as exc:
+        log.exception("list_vehicle_models error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
-    return registry.list_models(vehicle_id, user["id"])
+
+@router.get("/debug-models/{vehicle_id}")
+async def debug_models(
+    vehicle_id: int,
+    user: dict[str, Any] = Depends(get_current_user),
+):
+    """Raw DB query for debugging — no registry layer."""
+    session = database.get_session()
+    try:
+        rows = (
+            session.query(database.TrainedModel)
+            .filter_by(vehicle_id=vehicle_id, user_id=user["id"])
+            .all()
+        )
+        return {
+            "count": len(rows),
+            "user_id": user["id"],
+            "vehicle_id": vehicle_id,
+            "models": [_serialize_model(m) for m in rows],
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+    finally:
+        session.close()
+
 
 
 @router.post("/models/{model_id}/promote")

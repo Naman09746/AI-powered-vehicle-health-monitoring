@@ -1,185 +1,148 @@
 """
-Vehicle Health Score computation.
-Composite score from sensor deviations + model failure probability.
-Formula is fully documented and configurable via config.py.
+Vehicle Health Score computation helper.
+Calculates a 0 (critical) – 100 (perfect) health score on-the-fly based on sensor telemetry.
 """
 
-import numpy as np
-import pandas as pd
+from __future__ import annotations
 
-from core.config import HEALTH_BANDS, HEALTH_SCORE_WEIGHTS, SENSOR_COLUMNS, SENSOR_THRESHOLDS
+from typing import Any
+
+HEALTHY_RANGES = {
+    "engine_temp": (70.0, 95.0),       # Celsius
+    "oil_pressure": (25.0, 65.0),      # PSI
+    "coolant_temp": (80.0, 105.0),     # Celsius
+    "battery_voltage": (12.4, 14.8),   # Volts
+    "engine_rpm": (700.0, 3500.0),     # RPM
+    "vibration": (0.0, 0.4),           # g-force
+    "tire_pressure": (30.0, 36.0),     # PSI
+    "fuel_consumption": (5.0, 14.0),   # L/100km
+}
+
+WEIGHTS = {
+    "engine_temp": 0.20,
+    "oil_pressure": 0.20,
+    "coolant_temp": 0.15,
+    "battery_voltage": 0.15,
+    "engine_rpm": 0.10,
+    "vibration": 0.10,
+    "tire_pressure": 0.05,
+    "fuel_consumption": 0.05,
+}
 
 
-def calculate_health_score(
-    sensor_data: pd.Series | dict, failure_prob: float | None = None
-) -> dict:
+def compute_health_score(reading: dict[str, Any] | None) -> int:
     """
-    Calculate a composite vehicle health score (0–100).
-
-    Formula:
-        health_score = W_sensor * avg_sensor_health + W_model * (1 - failure_prob) * 100
-
-    Where:
-        - avg_sensor_health = mean of per-sensor health scores (0–100 each)
-        - per-sensor health = 100 if within normal range, decreasing as it deviates
-        - W_sensor and W_model are configurable weights from core.config.py
-
-    If no failure_prob is provided (no model trained yet), uses sensor health alone.
-
-    Returns:
-        dict with: score, band_name, band_color, sensor_scores, breakdown
+    Computes a vehicle health score between 0 and 100.
+    Returns 100 for perfect health, 0 for severe failure conditions.
     """
-    # Calculate per-sensor health scores
-    sensor_scores = {}
-    for col in SENSOR_COLUMNS:
-        value = sensor_data.get(col)
-        if value is None or (isinstance(value, float) and np.isnan(value)):
-            sensor_scores[col] = {
-                "score": 50,
-                "status": "Unknown",
-            }  # neutral if missing
+    if not reading:
+        return 100
+
+    total_weight = 0.0
+    weighted_score = 0.0
+
+    for sensor, (lo, hi) in HEALTHY_RANGES.items():
+        val = reading.get(sensor)
+        if val is None:
             continue
 
-        thresholds = SENSOR_THRESHOLDS[col]
-        score = _compute_sensor_health(float(value), thresholds)
-        sensor_scores[col] = {
-            "score": score,
-            "value": float(value),
-            "unit": thresholds["unit"],
-            "label": thresholds["label"],
-            "status": _score_to_status(score),
-        }
+        weight = WEIGHTS.get(sensor, 0.05)
+        mid = (lo + hi) / 2.0
+        half_range = (hi - lo) / 2.0
 
-    # Average sensor health
-    avg_sensor_health = np.mean([s["score"] for s in sensor_scores.values()])
+        if half_range <= 0:
+            sensor_score = 1.0
+        else:
+            # Score decreases proportionally to distance from healthy midpoint
+            distance = abs(float(val) - mid)
+            sensor_score = max(0.0, 1.0 - (distance / (half_range * 1.5)))
 
-    # Composite score
-    if failure_prob is not None:
-        w_sensor = HEALTH_SCORE_WEIGHTS["sensor_health"]
-        w_model = HEALTH_SCORE_WEIGHTS["model_prediction"]
-        model_score = (1 - failure_prob) * 100
-        health_score = w_sensor * avg_sensor_health + w_model * model_score
+        weighted_score += sensor_score * weight
+        total_weight += weight
+
+    if total_weight == 0:
+        return 100
+
+    final_score = int(round((weighted_score / total_weight) * 100))
+    return max(0, min(100, final_score))
+
+
+def get_health_status(score: int) -> str:
+    """Returns 'good', 'warning', or 'critical' based on health score."""
+    if score >= 75:
+        return "good"
+    if score >= 45:
+        return "warning"
+    return "critical"
+
+
+def calculate_health_score(sensor_data: Any = None, failure_prob: float | None = None) -> dict[str, Any]:
+    """Compatibility function returning dict with score, band_name, and status."""
+    if hasattr(sensor_data, "to_dict"):
+        reading_dict = sensor_data.to_dict()
+    elif isinstance(sensor_data, dict):
+        reading_dict = sensor_data
     else:
-        health_score = avg_sensor_health
-        w_sensor = 1.0
-        w_model = 0.0
-        model_score = None
+        reading_dict = {}
 
-    health_score = max(0, min(100, health_score))
+    score = compute_health_score(reading_dict)
+    if failure_prob is not None and failure_prob > 0.5:
+        score = min(score, int(round((1.0 - float(failure_prob)) * 100)))
 
-    # Determine band
-    band = _get_band(health_score)
-
+    status = get_health_status(score)
     return {
-        "score": round(health_score, 1),
-        "band_name": band["name"],
-        "band_color": band["color"],
-        "sensor_scores": sensor_scores,
-        "avg_sensor_health": round(avg_sensor_health, 1),
-        "model_score": round(model_score, 1) if model_score is not None else None,
-        "breakdown": {
-            "sensor_weight": w_sensor,
-            "model_weight": w_model,
-            "formula": (
-                f"{w_sensor:.0%} × Sensor Health ({avg_sensor_health:.1f}) + "
-                f"{w_model:.0%} × Model Score ({model_score:.1f})"
-                if model_score is not None
-                else f"100% × Sensor Health ({avg_sensor_health:.1f}) (no model trained)"
-            ),
-        },
+        "score": score,
+        "band_name": status.capitalize(),
+        "status": status,
     }
 
 
-def calculate_fleet_health(vehicles_data: list[dict]) -> dict:
+def compute_driver_score(readings: list[dict[str, Any]]) -> dict[str, Any]:
     """
-    Calculate fleet-wide aggregate health metrics.
-
-    Args:
-        vehicles_data: list of dicts, each with 'sensor_data' and optional 'failure_prob'
-
-    Returns:
-        dict with: avg_score, healthy_count, at_risk_count, critical_count, scores_list
+    Evaluates driver behavior score (0-100) based on telemetry patterns.
     """
-    scores = []
-    for v in vehicles_data:
-        result = calculate_health_score(v.get("sensor_data", {}), v.get("failure_prob"))
-        scores.append(result["score"])
-
-    if not scores:
+    if not readings:
         return {
-            "avg_score": 0,
-            "healthy_count": 0,
-            "at_risk_count": 0,
-            "critical_count": 0,
-            "scores_list": [],
+            "score": 95,
+            "rating": "Smooth & Efficient",
+            "harsh_acceleration_events": 0,
+            "over_rev_events": 0,
+            "excessive_idle_count": 0,
         }
 
+    over_revs = 0
+    harsh_accel = 0
+    idle_count = 0
+
+    for r in readings:
+        rpm = float(r.get("engine_rpm", 0) or 0)
+        vibration = float(r.get("vibration", 0) or 0)
+        speed = float(r.get("speed", 0) or 0)
+        load = float(r.get("engine_load", 0) or 0)
+
+        if rpm > 3800:
+            over_revs += 1
+        if vibration > 2.2:
+            harsh_accel += 1
+        if speed < 2 and load > 40:
+            idle_count += 1
+
+    deduction = (over_revs * 4) + (harsh_accel * 5) + (idle_count * 3)
+    score = max(35, min(100, 100 - deduction))
+
+    if score >= 85:
+        rating = "Smooth & Efficient"
+    elif score >= 65:
+        rating = "Moderate"
+    else:
+        rating = "Aggressive"
+
     return {
-        "avg_score": round(np.mean(scores), 1),
-        "healthy_count": sum(1 for s in scores if s >= 80),
-        "at_risk_count": sum(1 for s in scores if 60 <= s < 80),
-        "critical_count": sum(1 for s in scores if s < 60),
-        "scores_list": scores,
+        "score": score,
+        "rating": rating,
+        "harsh_acceleration_events": harsh_accel,
+        "over_rev_events": over_revs,
+        "excessive_idle_count": idle_count,
     }
 
 
-def _compute_sensor_health(value: float, thresholds: dict) -> float:
-    """
-    Compute a 0–100 health score for a single sensor reading.
-
-    - 100: Within normal range
-    - Decreasing linearly toward 0 as value approaches critical limits
-    - 0: At or beyond critical limit
-    """
-    normal_min = thresholds["min"]
-    normal_max = thresholds["max"]
-    critical_min = thresholds["critical_min"]
-    critical_max = thresholds["critical_max"]
-
-    # Within normal range
-    if normal_min <= value <= normal_max:
-        return 100.0
-
-    # Below normal
-    if value < normal_min:
-        if value <= critical_min:
-            return 0.0
-        # Linear interpolation between critical_min (0) and normal_min (100)
-        range_width = normal_min - critical_min
-        if range_width == 0:
-            return 0.0
-        return max(0, (value - critical_min) / range_width * 100)
-
-    # Above normal
-    if value > normal_max:
-        if value >= critical_max:
-            return 0.0
-        # Linear interpolation between normal_max (100) and critical_max (0)
-        range_width = critical_max - normal_max
-        if range_width == 0:
-            return 0.0
-        return max(0, (1 - (value - normal_max) / range_width) * 100)
-
-    return 50.0  # fallback
-
-
-def _score_to_status(score: float) -> str:
-    """Convert a sensor health score to a status string."""
-    if score >= 95:
-        return "Excellent"
-    elif score >= 80:
-        return "Good"
-    elif score >= 60:
-        return "Fair"
-    elif score >= 30:
-        return "Poor"
-    else:
-        return "Critical"
-
-
-def _get_band(score: float) -> dict:
-    """Get the health band for a given score."""
-    for band_name, band_info in HEALTH_BANDS.items():
-        if band_info["min"] <= score <= band_info["max"]:
-            return {"name": band_name, "color": band_info["color"]}
-    return {"name": "Critical", "color": HEALTH_BANDS["Critical"]["color"]}

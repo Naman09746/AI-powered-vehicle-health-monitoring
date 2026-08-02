@@ -59,7 +59,10 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
 
         response.headers["X-Correlation-ID"] = cid
         response.headers["X-Response-Time-Ms"] = str(elapsed)
+        response.headers["X-API-Version"] = "3.0"
+        response.headers["X-API-Deprecated"] = "false"
         return response
+
 
 
 # ── RFC 7807 Problem Details ───────────────────────────────────
@@ -293,10 +296,11 @@ def setup_rate_limiter(app: FastAPI) -> None:
     if not _SLOWAPI_AVAILABLE:
         return
 
-    limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+    from api.limiter import limiter
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)
+
 
 
 # ── Bootstrap all middleware ───────────────────────────────────
@@ -307,24 +311,10 @@ def setup_middleware(app: FastAPI) -> None:
     # Order matters: outermost first (last to execute).
     # 1. Correlation ID (outermost)
     app.add_middleware(CorrelationIDMiddleware)
-    # 2. CORS
-    # Merge configured origins + hardcoded production origin as safety net
-    # (prevents misconfiguration when the ALLOWED_ORIGINS env var omits the
-    #  production frontend URL — a common pitfall on Render/Vercel deploys)
-    _cors_origins = [o for o in ALLOWED_ORIGINS if o and o != "*"]
-    _cors_origins.extend([
-        "https://ai-powered-vehicle-health-monitorin.vercel.app",
-        "https://ai-powered-vehicle-health-monitoring.vercel.app",
-        "http://localhost:3000",
-        "http://localhost:8000",
-    ])
-    _cors_origins = list(dict.fromkeys(_cors_origins))
-
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_cors_origins,
-        allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+",
-        allow_credentials=True,
+        allow_origins=["*"],
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -88,8 +88,14 @@ async def liveness() -> dict[str, Any]:
     }
 
 
+from fastapi import APIRouter, Response
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
 @router.get("/health/ready")
-async def readiness() -> dict[str, Any]:
+async def readiness(response: Response) -> dict[str, Any]:
     """Readiness probe — checks DB, Redis, ML availability, and read replica."""
     start = time.perf_counter()
 
@@ -108,7 +114,9 @@ async def readiness() -> dict[str, Any]:
     except ImportError:
         replica = {"status": "not_configured"}
 
-    overall = "ok" if db["status"] == "ok" else "degraded"
+    overall = "ok" if db.get("status") == "ok" else "degraded"
+    if overall != "ok":
+        response.status_code = 503
 
     elapsed = round((time.perf_counter() - start) * 1000, 1)
     return {
@@ -124,11 +132,6 @@ async def readiness() -> dict[str, Any]:
         "duration_ms": elapsed,
     }
 
-
-@router.get("/health")
-async def health_summary() -> dict[str, Any]:
-    """Aggregated health summary (alias of /health/ready)."""
-    return await readiness()
 
 
 # ── Uptime tracking ────────────────────────────────────────────

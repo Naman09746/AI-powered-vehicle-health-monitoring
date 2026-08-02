@@ -36,8 +36,27 @@ async def run_prediction(
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found")
 
+    import os
     champion = registry.get_champion(vehicle_id, user["id"])
-    if not champion or not champion.model_path:
+    if not champion or not getattr(champion, "model_path", None) or not os.path.exists(champion.model_path):
+        from ml.ml_models import train_models
+        from api.dependencies import sync_to_async
+
+        # Auto-seed sensor data if empty
+        df_readings = await async_get_sensor_readings(vehicle_id, user["id"])
+        if df_readings.empty or len(df_readings) < 5:
+            from api.routers.simulator import ensure_vehicle_simulation
+            v_name = getattr(vehicle, "vehicle_id_display", f"VH-{vehicle_id}")
+            ensure_vehicle_simulation(vehicle_id, user["id"], v_name)
+            df_readings = await async_get_sensor_readings(vehicle_id, user["id"])
+
+        from core.preprocessing import preprocess
+        df_clean_train, _ = await sync_to_async(preprocess, df_readings)
+        train_res = await sync_to_async(train_models, df_clean_train, user["id"], vehicle_id)
+        await sync_to_async(registry.register, train_res, vehicle_id, user["id"])
+        champion = registry.get_champion(vehicle_id, user["id"])
+
+    if not champion:
         raise HTTPException(
             status_code=400,
             detail="No trained model found. Train a model first.",
@@ -46,19 +65,29 @@ async def run_prediction(
     # Get latest sensor readings
     df = await async_get_sensor_readings(vehicle_id, user["id"])
     if df.empty:
+        try:
+            from api.routers.simulator import ensure_vehicle_simulation
+            v_name = getattr(vehicle, "vehicle_id_display", f"VH-{vehicle_id}")
+            ensure_vehicle_simulation(vehicle_id, user["id"], v_name)
+            df = await async_get_sensor_readings(vehicle_id, user["id"])
+        except Exception:
+            pass
+
+    if df.empty:
         raise HTTPException(
             status_code=400,
             detail="No sensor data available for prediction.",
         )
 
-    feature_columns = json.loads(champion.feature_columns_json or "[]")
+    from core.preprocessing import preprocess, get_feature_columns
+    df_clean, _ = preprocess(df)
+
+    feature_columns = json.loads(getattr(champion, "feature_columns_json", "[]") or "[]")
     if not feature_columns:
-        from core.preprocessing import get_feature_columns
+        feature_columns = get_feature_columns(df_clean)
 
-        feature_columns = get_feature_columns(df)
-
-    # Use the most recent reading
-    latest = df.iloc[-1:]
+    # Use the most recent preprocessed reading
+    latest = df_clean.iloc[-1:]
     result = predict(
         model_path=champion.model_path,
         scaler_path=champion.scaler_path or "",

@@ -11,6 +11,8 @@ Endpoints:
 
 from __future__ import annotations
 
+from datetime import datetime
+import json
 import threading
 import time
 from typing import Any
@@ -32,6 +34,115 @@ router = APIRouter(prefix="/api/v1/simulator", tags=["simulator"])
 # Track active simulation threads per vehicle
 _simulations: dict[int, dict] = {}
 _simulation_lock = threading.Lock()
+
+def start_fleet_simulation():
+    """Auto-start simulation for all vehicles in the database."""
+    session = database.get_session()
+    try:
+        vehicles = session.query(database.Vehicle).all()
+        count = 0
+        for v in vehicles:
+            with _simulation_lock:
+                if v.id not in _simulations or not _simulations[v.id].get("running"):
+                    _simulations[v.id] = {
+                        "running": True,
+                        "profile": "healthy",
+                        "interval": 5.0,
+                        "tick": 0,
+                        "last_reading": None,
+                    }
+                    thread = threading.Thread(
+                        target=_simulation_worker,
+                        args=(v.id, "healthy", 5.0, v.user_id, v.vehicle_id_display),
+                        daemon=True,
+                    )
+                    thread.start()
+                    count += 1
+        if count > 0:
+            log.info("Auto-started fleet simulation for %d vehicles", count)
+    except Exception as e:
+        log.error("Failed to auto-start fleet simulation: %s", e)
+    finally:
+        session.close()
+
+
+def ensure_vehicle_simulation(vehicle_id: int, user_id: int, vehicle_id_display: str, interval: float = 2.0):
+    """Ensure a simulation thread is actively running for this vehicle and seed initial readings if empty."""
+    session = database.get_session()
+    try:
+        readings_count = session.query(database.SensorReading).filter_by(vehicle_id=vehicle_id).count()
+        if readings_count == 0:
+            upload_id = database.get_or_create_default_upload(vehicle_id, user_id)
+            now = time.time()
+            for i in range(50):
+                tick = i
+                reading = generate_realistic_row(vehicle_profile="healthy", tick=tick, seed=tick)
+                db_reading = database.SensorReading(
+                    upload_id=upload_id,
+                    vehicle_id=vehicle_id,
+                    user_id=user_id,
+                    timestamp=datetime.fromtimestamp(now - (50 - i) * 5),
+                    dtc_codes=json.dumps(reading.get("dtc_codes", [])),
+                    **{col: reading.get(col) for col in SENSOR_COLUMNS if col in reading},
+                )
+                session.add(db_reading)
+            session.commit()
+            log.info("Seeded 50 initial readings for vehicle %s", vehicle_id_display)
+    except Exception as e:
+        session.rollback()
+        log.error("Failed to seed initial readings for vehicle %s: %s", vehicle_id_display, e)
+    finally:
+        session.close()
+
+    with _simulation_lock:
+        if vehicle_id not in _simulations or not _simulations[vehicle_id].get("running"):
+            _simulations[vehicle_id] = {
+                "running": True,
+                "profile": "healthy",
+                "interval": interval,
+                "tick": 0,
+                "last_reading": None,
+            }
+            thread = threading.Thread(
+                target=_simulation_worker,
+                args=(vehicle_id, "healthy", interval, user_id, vehicle_id_display),
+                daemon=True,
+            )
+            thread.start()
+            log.info("Auto-started high-speed simulation (%.1fs) for vehicle %s", interval, vehicle_id_display)
+
+
+def seed_demo_fleet_for_user(user_id: int):
+    """Pre-populates a rich demo fleet with historical telemetry data for zero-wait evaluations."""
+    session = database.get_session()
+    try:
+        existing = session.query(database.Vehicle).filter_by(user_id=user_id).first()
+        if not existing:
+            v1 = database.create_vehicle(
+                user_id=user_id,
+                vehicle_id_display="VH-DEMO-001",
+                model="Toyota Camry Hybrid",
+                manufacturing_year=2024,
+                engine_type="Hybrid",
+                mileage=12500,
+            )
+            v2 = database.create_vehicle(
+                user_id=user_id,
+                vehicle_id_display="VH-DEMO-002",
+                model="Tesla Model 3",
+                manufacturing_year=2023,
+                engine_type="Electric",
+                mileage=24100,
+            )
+            for v in [v1, v2]:
+                if v:
+                    ensure_vehicle_simulation(v.id, user_id, v.vehicle_id_display)
+    except Exception as e:
+        log.error("Failed to seed demo fleet for user %s: %s", user_id, e)
+    finally:
+        session.close()
+
+
 
 
 def _simulation_worker(
@@ -71,9 +182,11 @@ def _simulation_worker(
                 upload_id=upload_id,
                 vehicle_id=vehicle_id,
                 user_id=user_id,
-                timestamp=time.time(),
+                timestamp=datetime.utcnow(),
+                dtc_codes=json.dumps(reading.get("dtc_codes", [])),
                 **{col: reading.get(col) for col in SENSOR_COLUMNS if col in reading},
             )
+
 
             session = database.get_session()
             try:
@@ -117,13 +230,20 @@ def _simulation_worker(
                 _simulations[vehicle_id]["running"] = False
 
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from api.limiter import limiter
+
+
 @router.post("/start/{vehicle_id}")
+@limiter.limit("5/minute")
 async def start_simulation(
+    request: Request,
     vehicle_id: int,
     profile: str = "healthy",
     interval: float = 3.0,
     user: dict[str, Any] = Depends(get_current_user),
 ):
+
     """Start live data simulation for a vehicle."""
     vehicle = database.get_vehicle_by_id(vehicle_id, user["id"])
     if not vehicle:
@@ -206,3 +326,13 @@ async def simulation_status(
                 "last_reading": info.get("last_reading"),
             }
     return {"running": False}
+
+
+from fastapi import WebSocket
+
+@router.websocket("/stream/{vehicle_id}")
+async def simulator_websocket(websocket: WebSocket, vehicle_id: int):
+    """WebSocket stream endpoint for live vehicle simulator telemetry."""
+    from api.websocket import vehicle_live_feed
+    await vehicle_live_feed(websocket, vehicle_id)
+

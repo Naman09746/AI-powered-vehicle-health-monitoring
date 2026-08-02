@@ -86,6 +86,14 @@ async def _build_dashboard_payload(vehicle_id: int, user_id: int) -> dict[str, A
         return {"error": "Vehicle not found"}
 
     readings = await async_get_sensor_readings(vehicle_id, user_id, limit=50)
+    if readings.empty:
+        try:
+            from api.routers.simulator import ensure_vehicle_simulation
+            ensure_vehicle_simulation(vehicle_id, user_id, vehicle.vehicle_id_display)
+            readings = await async_get_sensor_readings(vehicle_id, user_id, limit=50)
+        except Exception as e:
+            log.error("Auto-seed failed for vehicle %s: %s", vehicle_id, e)
+
     recent_readings = readings
     active_alerts = await async_get_active_alerts(user_id, vehicle_id)
     latest_pred = await async_get_latest_prediction(vehicle_id, user_id)
@@ -96,6 +104,44 @@ async def _build_dashboard_payload(vehicle_id: int, user_id: int) -> dict[str, A
     )
     health_score = health_result.get("score", 50)
     health_band = health_result.get("band_name", "Unknown")
+
+    dtc_list = []
+    if not readings.empty:
+        latest_row = readings.iloc[-1]
+        dtc_raw = latest_row.get("dtc_codes") if hasattr(latest_row, "get") else None
+        if dtc_raw:
+            try:
+                raw_codes = json.loads(dtc_raw) if isinstance(dtc_raw, str) else list(dtc_raw)
+                from scripts.generate_data import DTC_DESCRIPTIONS
+                dtc_list = [
+                    {"code": code, "description": DTC_DESCRIPTIONS.get(code, "Diagnostic Trouble Code")}
+                    for code in raw_codes
+                ]
+            except Exception:
+                pass
+
+    from ml.anomaly import predict_anomaly
+    latest_dict = readings.iloc[-1].to_dict() if not readings.empty else {}
+    anomaly_res = predict_anomaly(vehicle_id, user_id, latest_dict)
+
+    from ml.rul import estimate_rul
+    from core.health_score import compute_driver_score
+    from core.maintenance import predict_upcoming_maintenance
+
+    readings_list = recent_readings.to_dict(orient="records") if hasattr(recent_readings, "to_dict") else []
+    rul_res = estimate_rul(readings_list)
+    driver_res = compute_driver_score(readings_list)
+    maint_records = database.get_maintenance_history(vehicle_id, user_id)
+    upcoming_maint = predict_upcoming_maintenance(vehicle, maint_records)
+    # Resolve GPS location & recent route
+    trip_route = []
+    for r in readings_list[-20:]:
+        lat = r.get("latitude")
+        lng = r.get("longitude")
+        if lat is not None and lng is not None:
+            trip_route.append({"lat": float(lat), "lng": float(lng)})
+
+    current_location = trip_route[-1] if trip_route else {"lat": 37.7749, "lng": -122.4194}
 
     return {
         "vehicle": {
@@ -108,12 +154,18 @@ async def _build_dashboard_payload(vehicle_id: int, user_id: int) -> dict[str, A
             "last_service_date": str(vehicle.last_service_date)
             if vehicle.last_service_date
             else None,
+            "created_at": str(vehicle.created_at) if vehicle.created_at else None,
         },
-        "recent_readings": recent_readings.to_dict(orient="records")
-        if hasattr(recent_readings, "to_dict")
-        else [],
+        "recent_readings": readings_list,
         "health_score": health_score,
         "health_band": health_band,
+        "active_dtc_codes": dtc_list,
+        "anomaly_status": anomaly_res,
+        "location": current_location,
+        "trip_route": trip_route,
+        "rul": rul_res,
+        "driver_score": driver_res,
+        "upcoming_maintenance": upcoming_maint,
         "active_alerts": len(active_alerts),
         "total_readings": len(readings),
         "latest_prediction": {
@@ -123,6 +175,10 @@ async def _build_dashboard_payload(vehicle_id: int, user_id: int) -> dict[str, A
         if latest_pred
         else None,
     }
+
+
+
+
 
 
 @router.get("/{vehicle_id}/stream")
